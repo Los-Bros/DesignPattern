@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
 import java.util.List;
 
+@Service
 public class ProdutoService {
 
     private static final int MAX_PAGE_SIZE = 200;
