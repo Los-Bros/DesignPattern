@@ -25,12 +25,11 @@ public class ProdutoResource {
 
     @GetMapping
     public ResponseEntity<Page<ProdutoDTO>> list(
-            @RequestParam(required = false) Integer departamentoId,
             @RequestParam(required = false) String descricao,
             @PageableDefault(size = 20, sort = "descricao") Pageable pageable) {
 
         Page<ProdutoDTO> page =
-                (departamentoId != null)
+                (descricao != null)
                         ? service.findAllByDescricao(descricao, pageable)
                         : service.findAll(pageable);
 
@@ -40,11 +39,10 @@ public class ProdutoResource {
 
     @GetMapping("/all")
     public ResponseEntity<List<ProdutoDTO>> listAll(
-            @RequestParam(required = false) Integer departamentoId,
             @RequestParam(required = false) String descricao) {
 
         List<ProdutoDTO> body =
-                (departamentoId != null)
+                (descricao != null)
                         ? service.findAllByDescricao(descricao)
                         : service.findAll();
 
