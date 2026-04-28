@@ -40,12 +40,15 @@ public class Pedido {
     @Column(precision = 18, scale = 3, nullable = false)
     private BigDecimal valorFinal;
 
+    @OneToMany
     private List<ItemPedido> itens = new ArrayList<>();
 
     //estado atual do pedido.
+    @Transient
     private Status estadoAtual;
 
     //Frete
+    @Transient
     private Frete frete;
 
     public Pedido() {

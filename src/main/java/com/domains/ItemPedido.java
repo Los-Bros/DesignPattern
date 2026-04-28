@@ -29,7 +29,7 @@ public class ItemPedido {
     @Column(precision = 18, scale = 3, nullable = false)
     private Integer quantidade;
 
-    @OneToMany
+    @ManyToOne
     @JoinColumn(name = "seq_Produto")
     private Produto produto;
 
