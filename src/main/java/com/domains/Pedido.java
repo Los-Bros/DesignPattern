@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,8 @@ import java.util.List;
         allocationSize = 1
 )
 public class Pedido {
+
+    private static final BigDecimal VALOR_INICIAL = BigDecimal.ZERO.setScale(3, RoundingMode.HALF_UP);
 
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "seq_Pedido")
@@ -47,23 +50,26 @@ public class Pedido {
     @Transient
     private Status estadoAtual;
 
-    //Frete
+    // Tipo de frete usado pelo Strategy.
     @Transient
-    private Frete frete;
+    private Frete tipoFrete;
 
     public Pedido() {
         System.out.println("Pedido aguardando pagamento");
-        //define o estado atual
+        this.valor = VALOR_INICIAL;
+        this.valorFinal = VALOR_INICIAL;
+        this.criadoEm = LocalDate.now();
         this.estadoAtual = new AguardandoPagamentoStatus(this);
     }
 
     public Pedido(Long id, BigDecimal valor, LocalDate criadoEm,
                   BigDecimal valorFinal,List<ItemPedido> itens) {
         this.id = id;
-        this.valor = valor;
-        this.criadoEm = criadoEm;
-        this.valorFinal = valorFinal;
-        this.itens = itens;
+        this.valor = valor != null ? valor : VALOR_INICIAL;
+        this.criadoEm = criadoEm != null ? criadoEm : LocalDate.now();
+        this.valorFinal = valorFinal != null ? valorFinal : this.valor;
+        this.itens = itens != null ? itens : new ArrayList<>();
+        this.estadoAtual = new AguardandoPagamentoStatus(this);
     }
 
     public Long getId() {
@@ -76,6 +82,15 @@ public class Pedido {
 
     public BigDecimal getValor() {
         return valor;
+    }
+
+    public void setValor(BigDecimal valor) {
+        if (valor == null || valor.compareTo(BigDecimal.ZERO) < 0) {
+            throw new IllegalArgumentException("Valor do pedido deve ser informado e nao pode ser negativo");
+        }
+
+        this.valor = valor.setScale(3, RoundingMode.HALF_UP);
+        atualizarValorFinal();
     }
 
     public LocalDate getCriadoEm() {
@@ -103,22 +118,66 @@ public class Pedido {
     }
 
     public Frete getFrete() {
-        return frete;
+        return tipoFrete;
     }
 
     public void setFrete(Frete frete) {
-        this.frete = frete;
+        setTipoFrete(frete);
+    }
+
+    public Frete getTipoFrete() {
+        return tipoFrete;
+    }
+
+    public void setTipoFrete(Frete tipoFrete) {
+        if (tipoFrete == null) {
+            throw new IllegalArgumentException("Tipo de frete deve ser informado");
+        }
+
+        this.tipoFrete = tipoFrete;
+        atualizarValorFinal();
     }
 
     public void adicionarItem(Produto produto, int quantidade) {
-        // Criando a "ponte" entre o Pedido e o Produto
-        ItemPedido novoItem = new ItemPedido(id, produto.getValor(), quantidade, produto);
+        if (produto == null || produto.getValor() == null) {
+            throw new IllegalArgumentException("Produto deve ser informado");
+        }
+
+        if (quantidade <= 0) {
+            throw new IllegalArgumentException("Quantidade deve ser maior que zero");
+        }
+
+        BigDecimal valorItem = produto.getValor()
+                .multiply(BigDecimal.valueOf(quantidade))
+                .setScale(3, RoundingMode.HALF_UP);
+
+        ItemPedido novoItem = new ItemPedido(null, valorItem, quantidade, produto);
         this.itens.add(novoItem);
 
-        // Atualiza o valor total do pedido
-        this.valor = this.valor.add(novoItem.getValor());
+        this.valor = this.valor.add(valorItem).setScale(3, RoundingMode.HALF_UP);
+        atualizarValorFinal();
     }
 
+    public void realizarPagamento(){
+        if (this.tipoFrete == null) {
+            throw new IllegalStateException("Tipo de frete deve ser informado antes do pagamento");
+        }
+
+        atualizarValorFinal();
+        sucessoAoPagar();
+    }
+
+    private void atualizarValorFinal() {
+        BigDecimal valorPedido = this.valor != null ? this.valor : VALOR_INICIAL;
+
+        if (this.tipoFrete == null) {
+            this.valorFinal = valorPedido.setScale(3, RoundingMode.HALF_UP);
+            return;
+        }
+
+        BigDecimal valorFrete = this.tipoFrete.calcula(valorPedido);
+        this.valorFinal = valorPedido.add(valorFrete).setScale(3, RoundingMode.HALF_UP);
+    }
 
     public void sucessoAoPagar(){
         try{
