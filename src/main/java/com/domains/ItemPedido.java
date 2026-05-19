@@ -56,7 +56,7 @@ public class ItemPedido {
     }
 
     public void setValor(BigDecimal valor) {
-        this.valor = produto.getValor().multiply(BigDecimal.valueOf(quantidade));
+        this.valor = valor;
     }
 
     public Integer getQuantidade() {
