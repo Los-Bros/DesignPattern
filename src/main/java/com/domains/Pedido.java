@@ -1,8 +1,9 @@
 package com.domains;
 
 import com.domains.frete.Frete;
+import com.domains.frete.TipoFrete;
 import com.domains.status.Status;
-import com.domains.status.AguardandoPagamentoStatus;
+import com.domains.status.PedidoStatus;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Digits;
@@ -43,10 +44,19 @@ public class Pedido {
     @Column(precision = 18, scale = 3, nullable = false)
     private BigDecimal valorFinal;
 
-    @OneToMany
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    @JoinColumn(name = "pedido_id")
     private List<ItemPedido> itens = new ArrayList<>();
 
-    //estado atual do pedido.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private PedidoStatus statusAtual = PedidoStatus.AGUARDANDO_PAGAMENTO;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private TipoFrete tipoFreteAtual;
+
+    // Estado atual do pedido usado pelo State.
     @Transient
     private Status estadoAtual;
 
@@ -55,11 +65,10 @@ public class Pedido {
     private Frete tipoFrete;
 
     public Pedido() {
-        System.out.println("Pedido aguardando pagamento");
         this.valor = VALOR_INICIAL;
         this.valorFinal = VALOR_INICIAL;
         this.criadoEm = LocalDate.now();
-        this.estadoAtual = new AguardandoPagamentoStatus(this);
+        sincronizarObjetosDeDominio();
     }
 
     public Pedido(Long id, BigDecimal valor, LocalDate criadoEm,
@@ -69,7 +78,7 @@ public class Pedido {
         this.criadoEm = criadoEm != null ? criadoEm : LocalDate.now();
         this.valorFinal = valorFinal != null ? valorFinal : this.valor;
         this.itens = itens != null ? itens : new ArrayList<>();
-        this.estadoAtual = new AguardandoPagamentoStatus(this);
+        sincronizarObjetosDeDominio();
     }
 
     public Long getId() {
@@ -106,7 +115,9 @@ public class Pedido {
     }
 
     public void setValorFinal(BigDecimal valorFinal) {
-        this.valorFinal = valorFinal;
+        this.valorFinal = valorFinal == null
+                ? VALOR_INICIAL
+                : valorFinal.setScale(3, RoundingMode.HALF_UP);
     }
 
     public List<ItemPedido> getItens() {
@@ -114,7 +125,8 @@ public class Pedido {
     }
 
     public void setItens(List<ItemPedido> itens) {
-        this.itens = itens;
+        this.itens = itens != null ? itens : new ArrayList<>();
+        recalcularValorItens();
     }
 
     public Frete getFrete() {
@@ -135,7 +147,31 @@ public class Pedido {
         }
 
         this.tipoFrete = tipoFrete;
+        this.tipoFreteAtual = TipoFrete.fromFrete(tipoFrete);
         atualizarValorFinal();
+    }
+
+    public TipoFrete getTipoFreteAtual() {
+        return tipoFreteAtual;
+    }
+
+    public void setTipoFreteAtual(TipoFrete tipoFreteAtual) {
+        this.tipoFreteAtual = tipoFreteAtual;
+        this.tipoFrete = tipoFreteAtual == null ? null : tipoFreteAtual.criarFrete();
+        atualizarValorFinal();
+    }
+
+    public PedidoStatus getStatusAtual() {
+        return statusAtual;
+    }
+
+    public void setStatusAtual(PedidoStatus statusAtual) {
+        if (statusAtual == null) {
+            throw new IllegalArgumentException("Status do pedido deve ser informado");
+        }
+
+        this.statusAtual = statusAtual;
+        this.estadoAtual = statusAtual.criarStatus(this);
     }
 
     public void adicionarItem(Produto produto, int quantidade) {
@@ -179,32 +215,73 @@ public class Pedido {
         this.valorFinal = valorPedido.add(valorFrete).setScale(3, RoundingMode.HALF_UP);
     }
 
+    private void recalcularValorItens() {
+        this.valor = this.itens.stream()
+                .map(ItemPedido::getValor)
+                .filter(v -> v != null)
+                .reduce(VALOR_INICIAL, BigDecimal::add)
+                .setScale(3, RoundingMode.HALF_UP);
+        atualizarValorFinal();
+    }
+
     public void sucessoAoPagar(){
-        try{
-            System.out.println("Pedido Pago");
-            this.estadoAtual.sucessoAoPagar();
-        } catch(Exception e){
-            System.out.println(e.getMessage());
-        }
+        garantirEstadoAtual();
+        this.estadoAtual.sucessoAoPagar();
     }
     public void cancelarPedido(){
-        try{
-            System.out.println("Pedido Cancelar");
-            this.estadoAtual.cancelarPedido();
-        } catch(Exception e){
-            System.out.println(e.getMessage());
-        }
+        garantirEstadoAtual();
+        this.estadoAtual.cancelarPedido();
     }
     public void despacharPedido(){
-        try{
-            System.out.println("Pedido Enviado");
-            this.estadoAtual.despacharPedido();
-        } catch(Exception e){
-            System.out.println(e.getMessage());
-        }
+        garantirEstadoAtual();
+        this.estadoAtual.despacharPedido();
     }
     public void setEstadoAtual(Status estadoAtual) {
+        if (estadoAtual == null) {
+            throw new IllegalArgumentException("Status do pedido deve ser informado");
+        }
+
         this.estadoAtual = estadoAtual;
+        this.statusAtual = PedidoStatus.fromStatus(estadoAtual);
+    }
+
+    @PrePersist
+    @PreUpdate
+    private void antesDeSalvar() {
+        if (this.criadoEm == null) {
+            this.criadoEm = LocalDate.now();
+        }
+
+        if (this.statusAtual == null) {
+            this.statusAtual = PedidoStatus.AGUARDANDO_PAGAMENTO;
+        }
+
+        if (this.valor == null) {
+            this.valor = VALOR_INICIAL;
+        }
+
+        if (this.itens == null) {
+            this.itens = new ArrayList<>();
+        }
+
+        sincronizarObjetosDeDominio();
+        atualizarValorFinal();
+    }
+
+    @PostLoad
+    private void sincronizarObjetosDeDominio() {
+        if (this.statusAtual == null) {
+            this.statusAtual = PedidoStatus.AGUARDANDO_PAGAMENTO;
+        }
+
+        this.estadoAtual = this.statusAtual.criarStatus(this);
+        this.tipoFrete = this.tipoFreteAtual == null ? null : this.tipoFreteAtual.criarFrete();
+    }
+
+    private void garantirEstadoAtual() {
+        if (this.estadoAtual == null) {
+            sincronizarObjetosDeDominio();
+        }
     }
 
 }
